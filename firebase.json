@@ -6,7 +6,7 @@
     "indexes": "firestore.indexes.json"
   },
   "hosting": {
-    "site": "jdm-pos",
+    "site": "jdm-pos-app",
     "public": "dist",
     "ignore": [
       "firebase.json",
