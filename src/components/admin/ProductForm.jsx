@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { createProduct, updateProduct } from '../../services/productService'
 import { useCategories } from '../../hooks/useCategories'
 
-const EMOJIS = ['🥞', '🥩', '🥪', '🫓', '🧀', '🫔', '🥓', '🍽️', '🍗', '🥤', '🍟', '🍋', '🥨', '🌮', '🍕', '☕', '🧋']
+const EMOJIS = ['🥞', '🥩', '🥪', '🫓', '🧀', '🫔', '🥓', '🍽️', '🍗', '🥤', '🍟', '🍋', '🥨', '🌮', '🍕', '☕', '🧋', '🥥', '💧', '🥛', '🍦', '🍪', '🌭']
 
 const empty = { name: '', emoji: '🍺', category: '', priceUSD: '', active: true }
 
