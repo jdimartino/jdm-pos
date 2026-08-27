@@ -32,6 +32,10 @@ export function useCustomerDebt(customerId, customerPhone) {
                     openOrders,
                     loading: false,
                 }))
+            },
+            (err) => {
+                console.error('useCustomerDebt orders error:', err)
+                setDebt(prev => ({ ...prev, loading: false }))
             }
         )
 
@@ -45,6 +49,9 @@ export function useCustomerDebt(customerId, customerPhone) {
                         totalDebt: Math.max(0, totalOpen - totalAbonos),
                         totalAbonos,
                     }))
+                },
+                (err) => {
+                    console.error('useCustomerDebt abonos error:', err)
                 }
             )
             : () => {}

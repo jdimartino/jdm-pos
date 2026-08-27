@@ -128,6 +128,17 @@ export async function getOpenOrders(sessionId) {
 }
 
 /**
+ * Busca una orden abierta por teléfono del cliente en una sesión.
+ */
+export async function findOpenOrderByPhone(sessionId, phone) {
+    const norm = (p) => (p || '').replace(/\D/g, '')
+    const target = norm(phone)
+    if (!target) return null
+    const orders = await getOpenOrders(sessionId)
+    return orders.find(o => norm(o.client?.phone) === target) || null
+}
+
+/**
  * Retoma una orden en espera:
  * 1. Marca la orden como 'processing'
  * 2. Lee los ítems de la subcol y los devuelve para cargarlos en el carrito

@@ -45,6 +45,9 @@ export function useSalesReport(sessionId) {
 
             setOrders(enriched)
             setLoading(false)
+        }, (err) => {
+            console.error('useSalesReport error:', err)
+            setLoading(false)
         })
         return unsub
     }, [sessionId])

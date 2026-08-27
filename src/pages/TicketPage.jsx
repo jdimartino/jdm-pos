@@ -4,11 +4,12 @@ import { useCart } from '../context/CartContext'
 import { useSession } from '../context/SessionContext'
 import { DEFAULT_USER } from '../context/AuthContext'
 import { useNav } from '../context/NavigationContext'
-import { saveOrder, saveHoldOrder, nextInvoiceNumber, completeHoldOrder } from '../services/orderService'
+import { saveOrder, saveHoldOrder, nextInvoiceNumber, completeHoldOrder, findOpenOrderByPhone } from '../services/orderService'
 import { formatUSD, formatBs, usdToBs, bsToUsd, calcChange } from '../utils/money'
 import { updateCustomerStats, deductCredit, findCustomerByPhone } from '../services/customerService'
 import { addAbono, getAbonosByCustomer, consumePartialAbonos } from '../services/abonoService'
 import { useToast } from '../components/Toast'
+import { updateExchangeRate } from '../services/sessionService'
 
 const BASE_METHODS = [
     { id: 'bs_cash', label: 'Efectivo Bs.', icon: '💴' },
@@ -25,9 +26,13 @@ const MIXED_OPTIONS = [
     { id: 'usd_cash', label: 'Efectivo USD', icon: '💵' },
 ]
 
+const RATE_ENDPOINTS = [
+    'https://ve.dolarapi.com/v1/dolares/oficial',
+]
+
 export default function TicketPage() {
     const { items, totalUSD, dispatch } = useCart()
-    const { session } = useSession()
+    const { session, setSession } = useSession()
     const { setScreen, setOrderId, setLastOrderData, holdOrderId, setHoldOrderId, selectedClient, setSelectedClient } = useNav()
     const toast = useToast()
     const rate = session?.exchangeRate || null
@@ -44,6 +49,11 @@ export default function TicketPage() {
     const [abonosApplied, setAbonosApplied] = useState(0)
     const [abonoAmount, setAbonoAmount] = useState('')
     const [abonoCurrency, setAbonoCurrency] = useState('USD')
+    const [editingRate, setEditingRate] = useState(false)
+    const [rateValue, setRateValue] = useState('')
+    const [rateSaving, setRateSaving] = useState(false)
+    const [rateLoading, setRateLoading] = useState(false)
+    const [suggestedRate, setSuggestedRate] = useState(null)
 
     useEffect(() => {
         nextInvoiceNumber().then(setInvoiceNum).catch(() => {})
@@ -100,6 +110,54 @@ export default function TicketPage() {
             setMethod('transfer')
         }
     }, [methods])
+
+    const fetchRateSuggestion = async () => {
+        setRateLoading(true)
+        for (const url of RATE_ENDPOINTS) {
+            try {
+                const res = await fetch(url, { cache: 'no-store' })
+                if (!res.ok) continue
+                const data = await res.json()
+                const value = data.promedio ?? data.rate
+                if (value) {
+                    setSuggestedRate(Number(value))
+                    setRateValue(String(Number(value).toFixed(2)))
+                    setRateLoading(false)
+                    return
+                }
+            } catch { /* try next */ }
+        }
+        setRateLoading(false)
+    }
+
+    const handleSaveRate = async () => {
+        const r = parseFloat(rateValue)
+        if (isNaN(r) || r <= 0) {
+            toast.error('Ingresa una tasa válida.')
+            return
+        }
+        if (!session?.id) return
+        setRateSaving(true)
+        try {
+            await updateExchangeRate(session.id, r)
+            setSession({ ...session, exchangeRate: r })
+            setEditingRate(false)
+            setSuggestedRate(null)
+            toast.success(`Tasa actualizada a Bs ${r.toFixed(2)}`)
+        } catch (err) {
+            console.error(err)
+            toast.error('Error al actualizar la tasa.')
+        } finally {
+            setRateSaving(false)
+        }
+    }
+
+    useEffect(() => {
+        if (!rate && !editingRate) {
+            setEditingRate(true)
+            fetchRateSuggestion()
+        }
+    }, [])
 
     const totalBs = rate ? usdToBs(totalUSD, rate) : 0
     const netTotal = Math.max(0, totalUSD - creditApplied - abonosApplied)
@@ -176,14 +234,19 @@ export default function TicketPage() {
                 }
                 let targetOrderId = holdOrderId
                 if (!targetOrderId) {
-                    targetOrderId = await saveHoldOrder({
-                        cashierId: DEFAULT_USER.uid,
-                        sessionId: session.id,
-                        items,
-                        client: { name: selectedClient.name, phone: selectedClient.phone || '' },
-                        notes: '',
-                        customerId: selectedClient.id,
-                    })
+                    const existingOrder = await findOpenOrderByPhone(session.id, selectedClient.phone)
+                    if (existingOrder) {
+                        targetOrderId = existingOrder.id
+                    } else {
+                        targetOrderId = await saveHoldOrder({
+                            cashierId: DEFAULT_USER.uid,
+                            sessionId: session.id,
+                            items,
+                            client: { name: selectedClient.name, phone: selectedClient.phone || '' },
+                            notes: '',
+                            customerId: selectedClient.id,
+                        })
+                    }
                 }
                 await addAbono({
                     customerId: selectedClient.id,
@@ -329,6 +392,57 @@ export default function TicketPage() {
                             <p className="text-orange-400 font-bold text-sm">Sin sesión de caja</p>
                             <p className="text-slate-400 text-xs mt-0.5">Abre la caja del día antes de cobrar. Hasta entonces el botón estará bloqueado.</p>
                         </div>
+                    </div>
+                )}
+
+                {/* Alerta: falta tasa de cambio */}
+                {!noSession && !rate && (
+                    <div role="alert" className="bg-amber-500/15 border border-amber-500/30 rounded-2xl p-4 space-y-3">
+                        <div className="flex items-start gap-3">
+                            <span className="text-2xl">💱</span>
+                            <div>
+                                <p className="text-amber-400 font-bold text-sm">Falta tasa de cambio</p>
+                                <p className="text-slate-400 text-xs mt-0.5">Configura la tasa Bs/USD para poder cobrar.</p>
+                            </div>
+                        </div>
+                        <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">Bs</span>
+                            <input
+                                type="number" step="0.01" min="0.01"
+                                value={rateValue}
+                                onChange={e => setRateValue(e.target.value)}
+                                className="w-full bg-[#0F172A] border border-white/10 rounded-xl pl-9 pr-12 py-3 text-white text-sm focus:outline-none focus:border-amber-500 transition-colors"
+                                placeholder={rateLoading ? 'Consultando...' : '0.00'}
+                                autoFocus
+                            />
+                            {rateLoading && (
+                                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                    <div className="w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                                </div>
+                            )}
+                            {!rateLoading && suggestedRate && (
+                                <button
+                                    type="button"
+                                    onClick={() => setRateValue(String(suggestedRate.toFixed(2)))}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 px-1.5 py-0.5 rounded-lg transition-colors"
+                                    title="Usar tasa sugerida"
+                                >
+                                    ⟳ {suggestedRate.toFixed(2)}
+                                </button>
+                            )}
+                        </div>
+                        {suggestedRate && (
+                            <p className="text-slate-500 text-[10px]">
+                                Tasa sugerida: Bs {suggestedRate.toFixed(2)} (puedes modificarla)
+                            </p>
+                        )}
+                        <button
+                            onClick={handleSaveRate}
+                            disabled={rateSaving || !rateValue}
+                            className="w-full bg-amber-600 hover:bg-amber-500 text-white font-bold py-2.5 rounded-xl transition-colors disabled:opacity-50 text-sm"
+                        >
+                            {rateSaving ? 'Guardando...' : '💱 Guardar tasa y continuar'}
+                        </button>
                     </div>
                 )}
 

@@ -19,6 +19,9 @@ export function useOpenOrders() {
             docs.sort((a, b) => (b.updatedAt?.seconds || b.createdAt?.seconds || 0) - (a.updatedAt?.seconds || a.createdAt?.seconds || 0))
             setOrders(docs)
             setLoading(false)
+        }, (err) => {
+            console.error('useOpenOrders error:', err)
+            setLoading(false)
         })
         return unsub
     }, [])

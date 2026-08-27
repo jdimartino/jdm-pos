@@ -12,6 +12,9 @@ export function useProducts() {
         const unsub = onSnapshot(q, (snap) => {
             setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() })))
             setLoading(false)
+        }, (err) => {
+            console.error('useProducts error:', err)
+            setLoading(false)
         })
         return unsub
     }, [])

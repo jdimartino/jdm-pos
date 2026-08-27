@@ -38,7 +38,7 @@ export default function POSPage() {
         return [...new Set(ids.filter(Boolean))].slice(0, 5)
     }, [holdOrders, selectedClient?.orderId])
     const { itemsMap } = useMultipleOpenOrderItems(watchedOrderIds)
-    const isOnline = useOnlineStatus()
+    const { isOnline, connectionStatus } = useOnlineStatus()
     const toast = useToast()
 
     const [posMode, setPosMode] = useState('select')
@@ -56,6 +56,7 @@ export default function POSPage() {
     const [expandedOrderItems, setExpandedOrderItems] = useState([])
     const [itemsLoading, setItemsLoading] = useState(false)
 
+    const [savingTab, setSavingTab] = useState(false)
     const [pendingClientCreation, setPendingClientCreation] = useState(null)
     const [expandedLogs, setExpandedLogs] = useState({})
     const [editClientOpen, setEditClientOpen] = useState(false)
@@ -180,13 +181,23 @@ export default function POSPage() {
                     <div>
                         <p className="text-white font-bold text-sm leading-none flex items-center gap-1">
                             <LogoIcon className="w-4 h-4 inline-block" /> {business?.name || 'JDM-POS'}
-                            {!isOnline && <span className="ml-2 text-[11px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/20">Offline</span>}
+                            <span className={`inline-block w-2 h-2 rounded-full ml-1.5 ${
+                                connectionStatus === 'connected' ? 'bg-green-400' :
+                                connectionStatus === 'syncing' ? 'bg-amber-400 animate-pulse' :
+                                connectionStatus === 'error' ? 'bg-amber-500' :
+                                'bg-red-500'
+                            }`} title={
+                                connectionStatus === 'connected' ? 'Conectado' :
+                                connectionStatus === 'syncing' ? 'Sincronizando...' :
+                                connectionStatus === 'error' ? 'Error de conexión' :
+                                'Sin conexión'
+                            } />
                         </p>
                         <p className="text-slate-400 text-[11px] leading-none mt-1">by #JDMRules</p>
                     </div>
                     <div className="flex items-center gap-2">
                         {role === 'admin' && (
-                            <button onClick={() => setScreen?.('admin')} className="text-sm text-slate-400 hover:text-blue-400 transition-colors font-semibold px-4 py-2.5 rounded-xl hover:bg-blue-500/10">⚙️ Admin</button>
+                            <button onClick={() => setScreen?.('admin')} className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:text-blue-400 hover:border-blue-500/30 hover:bg-blue-500/10 transition-all">⚙️ Admin</button>
                         )}
                     </div>
                 </header>
@@ -224,16 +235,28 @@ export default function POSPage() {
             return nameMatch || phoneMatch
         })
         const openOrders = holdOrders.filter(o => o.status === 'open')
-        const openClients = openOrders.map(o => ({
-            id: o.customerId || null,
-            name: o.client?.name || '—',
-            phone: o.client?.phone || '',
-            totalUSD: o.totalUSD || 0,
-            itemCount: o.itemCount || 0,
-            createdAt: o.createdAt,
-            updatedAt: o.updatedAt,
-            orderId: o.id,
-        }))
+        const openClientsMap = new Map()
+        for (const o of openOrders) {
+            const phone = (o.client?.phone || '').replace(/\D/g, '')
+            const key = phone || o.id
+            if (openClientsMap.has(key)) {
+                const existing = openClientsMap.get(key)
+                existing.totalUSD += o.totalUSD || 0
+                existing.itemCount += o.itemCount || 0
+            } else {
+                openClientsMap.set(key, {
+                    id: o.customerId || null,
+                    name: o.client?.name || '—',
+                    phone: o.client?.phone || '',
+                    totalUSD: o.totalUSD || 0,
+                    itemCount: o.itemCount || 0,
+                    createdAt: o.createdAt,
+                    updatedAt: o.updatedAt,
+                    orderId: o.id,
+                })
+            }
+        }
+        const openClients = [...openClientsMap.values()]
         const filteredOpens = openClients.filter(o => {
             if (!search) return true
             const nameMatch = o.name?.toLowerCase().trim().includes(searchLower)
@@ -1073,7 +1096,7 @@ export default function POSPage() {
     const client = selectedClient
 
     const handleSaveTab = async () => {
-        if (!session?.id) return
+        if (!session?.id || savingTab) return
         if (items.length === 0) {
             if (client?.orderId) {
                 try {
@@ -1087,6 +1110,7 @@ export default function POSPage() {
             dispatch({ type: 'CLEAR_CART' })
             return
         }
+        setSavingTab(true)
         try {
             if (client?.orderId) {
                 await updateHoldOrder(client.orderId, items)
@@ -1094,6 +1118,12 @@ export default function POSPage() {
                     ensureCustomerByPhone({ name: client.name, phone: client.phone, notes: client.notes }).catch(() => {})
                 }
             } else {
+                const norm = (p) => (p || '').replace(/\D/g, '')
+                const clientPhone = norm(client?.phone)
+                const existingOrder = clientPhone
+                    ? holdOrders.find(o => o.status === 'open' && norm(o.client?.phone) === clientPhone)
+                    : null
+
                 let customerId = client?.id?.length >= 20 ? client.id : null
                 if (!customerId && client?.phone) {
                     try {
@@ -1101,15 +1131,21 @@ export default function POSPage() {
                         if (found) customerId = found.id
                     } catch {}
                 }
-                const id = await saveHoldOrder({
-                    cashierId: DEFAULT_USER.uid,
-                    sessionId: session.id,
-                    items,
-                    client: { name: client?.name || '—', phone: client?.phone || '' },
-                    notes: client?.notes || '',
-                    customerId,
-                })
-                setSelectedClient({ ...client, orderId: id })
+
+                if (existingOrder) {
+                    await updateHoldOrder(existingOrder.id, items)
+                    setSelectedClient({ ...client, orderId: existingOrder.id })
+                } else {
+                    const id = await saveHoldOrder({
+                        cashierId: DEFAULT_USER.uid,
+                        sessionId: session.id,
+                        items,
+                        client: { name: client?.name || '—', phone: client?.phone || '' },
+                        notes: client?.notes || '',
+                        customerId,
+                    })
+                    setSelectedClient({ ...client, orderId: id })
+                }
                 if (client?.phone) {
                     ensureCustomerByPhone({ name: client.name, phone: client.phone, notes: client.notes }).catch(() => {})
                 }
@@ -1120,6 +1156,8 @@ export default function POSPage() {
         } catch (err) {
             console.error(err)
             toast.error('Error al guardar la cuenta. Intenta de nuevo.')
+        } finally {
+            setSavingTab(false)
         }
     }
 
@@ -1279,13 +1317,13 @@ export default function POSPage() {
                             </div>
                         )}
 
-                        <div className="flex gap-2 mt-1">
+                                <div className="flex gap-2 mt-1">
                             {isClientMode ? (
                                 <>
-                                    <button onClick={handleSaveTab} className="flex-1 bg-slate-700 hover:bg-slate-600 active:scale-[0.98] text-white font-bold py-3 px-3 rounded-xl transition-all text-sm">← Regresar</button>
-                                    <button onClick={handleCharge} className="flex-1 bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-extrabold py-3 px-3 rounded-xl transition-all shadow-lg shadow-blue-600/30 text-sm">💳 Cobrar {formatUSD(totalUSD)}</button>
-                                    <button onClick={handleSaveTab} className="flex-1 bg-slate-600 hover:bg-slate-500 active:scale-[0.98] text-white font-bold py-3 px-3 rounded-xl transition-all text-sm">💾 Guardar</button>
-                                    <button onClick={handleWhatsApp} className="flex-1 bg-green-600/15 hover:bg-green-600/25 border border-green-500/20 active:scale-[0.98] text-green-400 font-bold py-3 px-3 rounded-xl transition-all text-sm">📱 WhatsApp</button>
+                                    <button onClick={handleSaveTab} disabled={savingTab} className="flex-1 bg-slate-700 hover:bg-slate-600 active:scale-[0.98] text-white font-bold py-3 px-3 rounded-xl transition-all text-sm disabled:opacity-40 disabled:pointer-events-none">← Regresar</button>
+                                    <button onClick={handleCharge} disabled={savingTab} className="flex-1 bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-extrabold py-3 px-3 rounded-xl transition-all shadow-lg shadow-blue-600/30 text-sm disabled:opacity-40 disabled:pointer-events-none">💳 Cobrar {formatUSD(totalUSD)}</button>
+                                    <button onClick={handleSaveTab} disabled={savingTab} className="flex-1 bg-slate-600 hover:bg-slate-500 active:scale-[0.98] text-white font-bold py-3 px-3 rounded-xl transition-all text-sm disabled:opacity-40 disabled:pointer-events-none">{savingTab ? 'Guardando...' : '💾 Guardar'}</button>
+                                    <button onClick={handleWhatsApp} disabled={savingTab} className="flex-1 bg-green-600/15 hover:bg-green-600/25 border border-green-500/20 active:scale-[0.98] text-green-400 font-bold py-3 px-3 rounded-xl transition-all text-sm disabled:opacity-40 disabled:pointer-events-none">📱 WhatsApp</button>
                                 </>
                             ) : (
                                 <button onClick={handleCharge} className="w-full bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-extrabold py-3 px-5 rounded-xl transition-all shadow-lg shadow-blue-600/30 text-sm">💳 Cobrar {formatUSD(totalUSD)}</button>

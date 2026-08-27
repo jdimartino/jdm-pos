@@ -35,13 +35,21 @@ export default function SuccessPage() {
 
         const businessName = business?.name || 'JDM-POS'
 
+        const receiptLines = []
+        if (business?.whatsappReceipt?.holder) receiptLines.push(`👤 ${business.whatsappReceipt.holder}`)
+        if (business?.whatsappReceipt?.phone) receiptLines.push(`📱 ${business.whatsappReceipt.phone}`)
+        if (business?.whatsappReceipt?.id) receiptLines.push(`Cedula  ${business.whatsappReceipt.id}`)
+        if (business?.whatsappReceipt?.bank) receiptLines.push(`🏦 ${business.whatsappReceipt.bank}`)
+        const receiptSection = receiptLines.length > 0 ? `\n*Datos del Pago Movil*\n${receiptLines.join('\n')}\n` : ''
+
         const msg =
             `🍔 *${businessName}* — Detalle de tu compra\n\n` +
             `${greeting} aquí el resumen de tu compra:\n\n` +
             `*Ticket:* #${String(lastOrderData?.invoiceNumber || 0).padStart(4, '0')}\n\n` +
             `${lines}\n\n` +
             `*Total: ${formatUSD(lastOrderData?.totalUSD || 0)}*\n` +
-            `*Forma de pago:* ${payMethod}\n\n` +
+            `*Forma de pago:* ${payMethod}\n` +
+            `${receiptSection}\n` +
             `Gracias por su compra 🎉\n` +
             `_JDM-POS by #JDMRules_`
 
