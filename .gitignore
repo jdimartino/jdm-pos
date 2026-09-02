@@ -29,3 +29,8 @@ dist-ssr
 # Firebase hosting cache
 .firebase/
 firebase-debug.log
+
+# Firebase Cloud Functions
+functions/node_modules/
+functions/lib/
+functions/.env
