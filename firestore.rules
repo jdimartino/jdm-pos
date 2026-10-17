@@ -1,45 +1,70 @@
+// RETIRED — rules for tucanapp-pos now live in pos-monorepo/firestore.rules. Do not deploy from this folder.
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ⚠️ LEGACY ROOT-LEVEL COLLECTIONS — ACCESS INTENTIONALLY CLOSED.
+    // pos-core no longer reads/writes anything at the root; all app data now
+    // lives under tenants/{tenantId}/** (see the block at the bottom).
+    // The documents below are KEPT IN PLACE as the migration's rollback copy —
+    // only access is denied here, no data was deleted. If a rollback is ever
+    // needed, temporarily re-open these or restore from the tenants/ copy.
     match /customers/{customerId} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
 
     match /orders/{orderId} {
-      allow read, write: if true;
+      allow read, write: if false;
 
       match /items/{itemId} {
-        allow read, write: if true;
+        allow read, write: if false;
       }
 
       match /payments/{paymentId} {
-        allow read, write: if true;
+        allow read, write: if false;
       }
     }
 
     match /products/{productId} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
 
     match /categories/{categoryId} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
 
     match /sessions/{sessionId} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
 
     match /abonos/{abonoId} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
 
     match /settings/{settingId} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
 
     match /counters/{counterId} {
-      allow read, write: if true;
+      allow read, write: if false;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // TENANT ISOLATION (NEW) — tenants/{tenantId}/**
+    //
+    // ⚠️  THIS IS NOT IDENTITY-BASED SECURITY. There is no Firebase Auth and
+    //     no per-cashier login in this system yet (owners operate it
+    //     directly). This block only enforces tenant ISOLATION by path
+    //     (the "opción 3" decision): any client may read/write inside one of
+    //     the known tenant subtrees, and can never read/write across tenants
+    //     or outside tenants/. Do NOT mistake it for real security — if/when
+    //     cashier auth is introduced, these rules MUST be revisited.
+    //
+    //     The OLD root-level collections above stay permissive on purpose
+    //     (legacy/cached clients); tightening them is a separate later task.
+    // ─────────────────────────────────────────────────────────────────────
+    match /tenants/{tenantId}/{document=**} {
+      allow read, write: if tenantId in ['macuoco', 'cochinitos'];
     }
   }
 }
